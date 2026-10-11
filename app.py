@@ -7,7 +7,7 @@ import threading
 import os
 
 # ====================== CONFIG ======================
-TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "eb11f97c310f407da9961dc7c67a697e")
+TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "cd8d1e68081b4d55a0385938538911d1")
 NTFY_TOPIC = "TYf7NDB9moLR3kTq"
 SYMBOL = "EUR/USD"
 CHECK_INTERVAL = 45  # seconds
