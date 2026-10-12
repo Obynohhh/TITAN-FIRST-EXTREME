@@ -339,4 +339,77 @@ st.markdown("""
 - Data source: Full Dukascopy H1 2010–2026 (113,207 bars).
 """)
 
-st.caption("Alerts are sent automatically to your ntfy topic the moment First or Second Extreme is confirmed.")
+# ====================== LIVE DAILY LOG ======================
+st.markdown("---")
+st.subheader("📅 Live Daily Log (Auto-recorded)")
+
+LOG_FILE = "daily_performance_log.csv"
+
+def load_log():
+    if os.path.exists(LOG_FILE):
+        try:
+            return pd.read_csv(LOG_FILE)
+        except:
+            return pd.DataFrame(columns=["Date", "Pair", "FE Type", "Predicted Direction", "Actual Close Direction", "Result", "FE Price", "Source"])
+    return pd.DataFrame(columns=["Date", "Pair", "FE Type", "Predicted Direction", "Actual Close Direction", "Result", "FE Price", "Source"])
+
+def save_log(df):
+    df.to_csv(LOG_FILE, index=False)
+
+log_df = load_log()
+
+# Evaluate and record today's result for each pair
+spain_now = get_spain_now()
+today_str = spain_now.strftime("%Y-%m-%d")
+
+for key in PAIRS:
+    df, source = fetch_h1(key)
+    result = analyze_extremes(df)
+
+    if result and result.get("fe_confirmed") and st.session_state.get(f"{key}_fe_confirmed"):
+        # Check if already logged today
+        already = ((log_df["Date"] == today_str) & (log_df["Pair"] == key)).any() if not log_df.empty else False
+
+        if not already and len(df) > 0:
+            # Get today's actual close direction
+            today_bars = df[df["datetime"].dt.date == spain_now.date()]
+            if len(today_bars) >= 2:
+                day_open = today_bars.iloc[0]["open"]
+                day_close = today_bars.iloc[-1]["close"]
+                actual_dir = "BUY" if day_close > day_open else "SELL"
+
+                predicted = st.session_state[f"{key}_direction"]
+                outcome = "CORRECT" if predicted == actual_dir else "WRONG"
+
+                new_row = {
+                    "Date": today_str,
+                    "Pair": key,
+                    "FE Type": st.session_state[f"{key}_fe_type"],
+                    "Predicted Direction": predicted,
+                    "Actual Close Direction": actual_dir,
+                    "Result": outcome,
+                    "FE Price": st.session_state[f"{key}_fe_price"],
+                    "Source": source
+                }
+
+                log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
+                save_log(log_df)
+
+# Display the log
+if not log_df.empty:
+    st.dataframe(log_df.sort_values("Date", ascending=False), use_container_width=True, hide_index=True)
+
+    # Summary stats
+    total = len(log_df)
+    correct = len(log_df[log_df["Result"] == "CORRECT"])
+    accuracy = (correct / total * 100) if total > 0 else 0
+
+    colx, coly, colz = st.columns(3)
+    with colx:
+        st.metric("Total Days Logged", total)
+    with coly:
+        st.metric("Correct", correct)
+    with colz:
+        st.metric("Live Accuracy", f"{accuracy:.1f}%")
+else:
+    st.info("No days recorded yet. The system will automatically log each day once First Extreme is confirmed and the day progresses.")
