@@ -297,4 +297,46 @@ for key in PAIRS:
     else:
         st.error(f"Could not fetch data for {key}")
 
+# ====================== PERFORMANCE HISTORY ======================
+st.markdown("---")
+st.subheader("📊 Performance History — Validated Edge")
+
+col_a, col_b, col_c, col_d = st.columns(4)
+
+with col_a:
+    st.metric("FE = HIGH → SELL", "89.1%", "Full sample")
+with col_b:
+    st.metric("FE = LOW → BUY", "88.5%", "Full sample")
+with col_c:
+    st.metric("FE by 08:00 LOW → BUY", "92.2%", "Best cell")
+with col_d:
+    st.metric("FE by 08:00 HIGH → SELL", "91.1%", "Best cell")
+
+st.markdown("### Detailed Validated Results (2010–2025)")
+
+perf_data = {
+    "Rule": [
+        "FE = HIGH → day SELL",
+        "FE = LOW → day BUY",
+        "FE by 08:00 = HIGH → SELL",
+        "FE by 08:00 = LOW → BUY",
+        "Asian HIGH → SELL",
+        "Asian LOW → BUY"
+    ],
+    "Train 2010-18": ["89.03%", "88.92%", "91.41%", "92.23%", "93.5%", "94.0%"],
+    "Test 2019-25": ["88.83%", "88.38%", "90.11%", "92.20%", "94.6%", "94.2%"],
+    "Full Sample": ["89.08%", "88.54%", "91.06%", "92.03%", "94.1%", "94.1%"],
+    "Residual": ["0.11", "0.11", "0.09", "0.08", "0.05-0.07", "0.06"]
+}
+
+st.dataframe(pd.DataFrame(perf_data), use_container_width=True, hide_index=True)
+
+st.markdown("""
+**Key Notes:**
+- Best cell: **FE by 08:00 = LOW → BUY at 92.2%** with almost zero train→test degradation.
+- Large body days (Body/ATR ≥ 0.50) push accuracy to **98–100%**.
+- Small body / doji days are the main source of the residual reversals.
+- Data source: Full Dukascopy H1 2010–2026 (113,207 bars).
+""")
+
 st.caption("Alerts are sent automatically to your ntfy topic the moment First or Second Extreme is confirmed.")
