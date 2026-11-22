@@ -5,10 +5,12 @@ from datetime import datetime, timedelta, timezone
 import time
 import threading
 import os
+import json
+from pathlib import Path
 
 # ====================== CONFIG ======================
-TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "cd8d1e68081b4d55a0385938538911d1")
-NTFY_TOPIC = "TYf7NDB9moLR3kTq"
+TWELVE_API_KEY = os.environ.get("TWELVE_API_KEY", "")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
 CHECK_INTERVAL = 60  # seconds
 
 PAIRS = {
@@ -39,6 +41,9 @@ for key in PAIRS:
 
 # ====================== HELPERS ======================
 def send_ntfy(title, message, priority=5):
+    if not NTFY_TOPIC:
+        print("ntfy not configured: set NTFY_TOPIC in the hosting environment")
+        return
     try:
         requests.post(
             f"https://ntfy.sh/{NTFY_TOPIC}",
@@ -413,3 +418,99 @@ if not log_df.empty:
         st.metric("Live Accuracy", f"{accuracy:.1f}%")
 else:
     st.info("No days recorded yet. The system will automatically log each day once First Extreme is confirmed and the day progresses.")
+
+
+# ====================== READ-ONLY TITAN SNAPSHOT EXPORT ======================
+# Publishes selected platform outputs for the central TITAN Research AI.
+# This export is read-only: it does not place trades, change alerts, or expose secrets.
+def publish_titan_snapshot():
+    generated_utc = datetime.now(timezone.utc)
+    generated_spain = get_spain_now()
+    pair_snapshots = {}
+
+    for pair_key in PAIRS:
+        live_df, live_source = fetch_h1(pair_key)
+        live_result = analyze_extremes(live_df)
+
+        latest_bar_time = None
+        latest_close = None
+        if live_df is not None and not live_df.empty:
+            latest = live_df.iloc[-1]
+            latest_bar_time = str(latest["datetime"])
+            latest_close = round(float(latest["close"]), 5)
+
+        pair_snapshots[pair_key] = {
+            "data_status": "AVAILABLE" if live_df is not None and not live_df.empty else "UNAVAILABLE",
+            "data_source": live_source if live_df is not None else None,
+            "latest_bar_time": latest_bar_time,
+            "latest_close": latest_close,
+            "bars_received": int(len(live_df)) if live_df is not None else 0,
+            "today_analysis": live_result,
+            "monitor_state": {
+                "first_extreme_confirmed": bool(st.session_state.get(f"{pair_key}_fe_confirmed", False)),
+                "first_extreme_type": st.session_state.get(f"{pair_key}_fe_type"),
+                "first_extreme_price": st.session_state.get(f"{pair_key}_fe_price"),
+                "first_extreme_time": st.session_state.get(f"{pair_key}_fe_time"),
+                "direction": st.session_state.get(f"{pair_key}_direction"),
+                "displayed_accuracy": st.session_state.get(f"{pair_key}_accuracy"),
+                "source": st.session_state.get(f"{pair_key}_source"),
+                "second_extreme_confirmed": bool(st.session_state.get(f"{pair_key}_se_confirmed", False)),
+            },
+        }
+
+    # Keep platform-published backtest figures distinct from independently verified results.
+    platform_claims = {
+        "label": "Figures displayed by the TITAN First Extreme platform; not independently verified by this connector",
+        "period_displayed": "2010–2025",
+        "metrics": {
+            "FE_HIGH_to_SELL_full_sample": "89.08%",
+            "FE_LOW_to_BUY_full_sample": "88.54%",
+            "FE_by_0800_HIGH_to_SELL_full_sample": "91.06%",
+            "FE_by_0800_LOW_to_BUY_full_sample": "92.03%",
+            "Asian_HIGH_to_SELL_full_sample": "94.1%",
+            "Asian_LOW_to_BUY_full_sample": "94.1%",
+        },
+        "train_test_table": perf_data,
+    }
+
+    history_summary = None
+    if "log_df" in globals() and isinstance(log_df, pd.DataFrame) and not log_df.empty:
+        total = int(len(log_df))
+        correct = int((log_df["Result"] == "CORRECT").sum()) if "Result" in log_df.columns else 0
+        history_summary = {
+            "rows": total,
+            "correct": correct,
+            "accuracy_percent": round(correct / total * 100, 2) if total else None,
+            "latest_date": str(log_df["Date"].max()) if "Date" in log_df.columns else None,
+        }
+
+    snapshot = {
+        "schema_version": "1.0",
+        "platform_id": "titan_first_extreme",
+        "platform_name": "TITAN First Extreme 24/7",
+        "generated_at_utc": generated_utc.isoformat(),
+        "generated_at_spain": generated_spain.isoformat(),
+        "refresh_interval_seconds": CHECK_INTERVAL,
+        "pairs": pair_snapshots,
+        "platform_published_backtest_claims": platform_claims,
+        "live_history_summary": history_summary,
+        "safety": {
+            "read_only_export": True,
+            "not_an_execution_interface": True,
+            "unavailable_data_must_not_be_interpreted_as_no_signal": True,
+        },
+    }
+
+    static_dir = Path(__file__).parent / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    target = static_dir / "titan_first_extreme_snapshot.json"
+    temporary = static_dir / "titan_first_extreme_snapshot.tmp"
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(snapshot, handle, ensure_ascii=False, indent=2, default=str)
+    temporary.replace(target)
+
+# Export once on each Streamlit script run, after the platform's calculations.
+try:
+    publish_titan_snapshot()
+except Exception as snapshot_error:
+    st.warning(f"Read-only TITAN snapshot export unavailable: {snapshot_error}")
